@@ -1,0 +1,190 @@
+Description: Server Stack for Project 2 - Deploy a high availability web app using cloudformation
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefixed to our resources
+    Type: String
+
+  AMI:
+    Description: Amazon Machine Image for our EC2 instances
+    Type: String
+
+  InstanceType:
+    Description: Instance specificatons for our web server
+    Type: String
+
+  IAMPolicy:
+    Description: Managed IAM Policy for our EC2 Instances
+    Type: String
+
+Resources:
+ #IAM Role and Instance Profile for S3 Read Only Access
+  S3ReadOnlyEC2:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref IAMPolicy
+
+  ServerInstanceProfile:
+   Type: AWS::IAM::InstanceProfile
+   Properties: 
+      Roles:
+        - !Ref S3ReadOnlyEC2
+
+
+ #Security Groups
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow all traffic inbound port 80, outbound to servers port 80
+      SecurityGroupEgress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-LB-Sec-Group
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPC"
+
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow HTTP inbound port 80, unrestricted outbound access
+      SecurityGroupEgress: 
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Server-Sec-Group
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPC"
+
+
+ #Auto-Scaling groups and Launch Configurations
+  WebServerLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties: 
+      BlockDeviceMappings: 
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: '10'
+      IamInstanceProfile: !Ref ServerInstanceProfile
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      SecurityGroups: 
+        - !Ref WebServerSecGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install apache2 -y
+          systemctl start apache2.service
+          cd /var/www/html
+          echo "It works! Udagram, Udacity" > index.html
+
+  WebServerGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties: 
+      LaunchConfigurationName: !Ref WebServerLaunchConfig
+      MaxSize: '4'
+      MinSize: '4'
+      TargetGroupARNs: 
+        - !Ref Target
+      VPCZoneIdentifier: 
+        - Fn::ImportValue:
+            !Sub "${EnvironmentName}-Private-Subnets"
+
+
+ #Load Balancer, Listener, Listener Rules and Target Group
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      SecurityGroups: 
+        - !Ref LBSecGroup
+      Subnets: 
+        - Fn::ImportValue:
+            !Sub "${EnvironmentName}-Public-Subnet-1"
+        - Fn::ImportValue:
+            !Sub "${EnvironmentName}-Public-Subnet-2"
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: forward
+          TargetGroupArn: !Ref Target
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  LBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties: 
+      Actions: 
+        - Type: forward
+          TargetGroupArn: !Ref Target
+      Conditions: 
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref Listener
+      Priority: 1
+
+  Target:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPC"
+
+
+Outputs:
+  WebServerSecGroup:
+    Description: The security group attached to our web servers
+    Value: !Ref WebServerSecGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-Server-Sec-Group
+
+  LBSecGroup:
+    Description: The security group attached to our Load Balancer
+    Value: !Ref LBSecGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-LB-Sec-Group
+
+  LBUrl:
+    Description: URL/DNS Name for our load balancer
+    Value: !Join [ "" , [ "http://", !GetAtt LoadBalancer.DNSName ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-LB-URL

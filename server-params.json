@@ -1,0 +1,21 @@
+[
+	{
+		"ParameterKey": "EnvironmentName",
+		"ParameterValue": "UdacityProject-2"
+	},
+
+	{
+		"ParameterKey": "AMI",
+		"ParameterValue": "ami-005de95e8ff495156"
+	},
+
+	{
+		"ParameterKey": "InstanceType",
+		"ParameterValue": "t2.medium"
+	},
+
+	{
+		"ParameterKey": "IAMPolicy",
+		"ParameterValue": "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+	}
+]
