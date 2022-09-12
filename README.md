@@ -26,6 +26,3 @@ This script takes in 6 arguments which i have already hardcoded for your conveni
 To teardown the infrastructure once you're done testing make use of the following script
 - destroy.sh
 Following the same procedure as above, I have hardcoded the arguments for your convenience.
-
-##### Application Link
-Once stack creation is complete the app can be accessed via => http://serve-loadb-y9nw5054smkc-825750187.us-east-1.elb.amazonaws.com/
